@@ -12,11 +12,13 @@ default:
     @echo "   just ctag [PROJECT_PATH]     - Measure ctags generation time"
     @echo "   just ctag-here               - Measure ctags for current directory"
     @echo "   just ctag-interactive        - Interactive ctag measurement"
+    @echo "   just ctag-browse             - Browse directories interactively for ctag measurement"
     @echo ""
     @echo "🌳 AST commands:"
     @echo "   just ast [FILE_PATH]         - Measure AST generation time for single file"
     @echo "   just ast-multi [FILES...]    - Measure AST generation time for multiple files"
     @echo "   just ast-interactive         - Interactive AST measurement"
+    @echo "   just ast-browse              - Browse directories/files interactively for AST measurement"
     @echo ""
     @echo "📊 Batch commands:"
     @echo "   just measure-all [PROJECT]   - Run both ctag and common file AST measurements"
@@ -128,6 +130,76 @@ ctag-interactive:
     echo "🏷️  Measuring ctags generation time for: $project_path"
     python3 ctag.py "$project_path"
 
+# Browse directories interactively for ctag measurement
+ctag-browse:
+    #!/usr/bin/env bash
+    current_dir="$(pwd)"
+    
+    while true; do
+        clear
+        echo "🏷️  Interactive Directory Browser for Ctags"
+        echo "📁 Current directory: $current_dir"
+        echo ""
+        
+        # Show parent directory option
+        echo "0) 📁 .. (Parent directory)"
+        echo "1) 🎯 [SELECT THIS DIRECTORY]"
+        echo ""
+        
+        # List directories with numbers
+        counter=2
+        declare -a dirs
+        dirs[1]="."
+        
+        if [ -d "$current_dir" ]; then
+            while IFS= read -r -d '' dir; do
+                if [ -d "$dir" ] && [ "$(basename "$dir")" != "." ] && [ "$(basename "$dir")" != ".." ]; then
+                    dirs[$counter]="$dir"
+                    echo "$counter) 📁 $(basename "$dir")"
+                    ((counter++))
+                fi
+            done < <(find "$current_dir" -maxdepth 1 -type d -print0 | sort -z)
+        fi
+        
+        echo ""
+        echo "Enter your choice (0 for parent, 1 to select current, 2+ for subdirectory, q to quit):"
+        read -r choice
+        
+        case $choice in
+            0)
+                # Go to parent directory
+                current_dir="$(dirname "$current_dir")"
+                ;;
+            1)
+                # Select current directory
+                echo ""
+                echo "🏷️  Selected directory: $current_dir"
+                echo "🏷️  Measuring ctags generation time..."
+                python3 ctag.py "$current_dir"
+                break
+                ;;
+            q|Q)
+                echo "❌ Cancelled"
+                break
+                ;;
+            *)
+                # Check if it's a valid directory choice
+                if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 2 ] && [ "$choice" -lt "$counter" ]; then
+                    selected_dir="${dirs[$choice]}"
+                    if [ -d "$selected_dir" ]; then
+                        current_dir="$selected_dir"
+                    else
+                        echo "❌ Invalid directory"
+                        sleep 1
+                    fi
+                else
+                    echo "❌ Invalid choice"
+                    sleep 1
+                fi
+                ;;
+        esac
+    done
+
 # Measure AST generation time for a single file
 ast FILE_PATH="":
     #!/usr/bin/env bash
@@ -184,6 +256,122 @@ ast-interactive:
             echo "❌ Invalid choice"
             ;;
     esac
+
+# Browse directories/files interactively for AST measurement
+ast-browse:
+    #!/usr/bin/env bash
+    current_dir="$(pwd)"
+    
+    while true; do
+        clear
+        echo "🌳 Interactive File Browser for AST Measurement"
+        echo "📁 Current directory: $current_dir"
+        echo ""
+        
+        # Show parent directory option
+        echo "0) 📁 .. (Parent directory)"
+        echo ""
+        
+        # List directories and files with numbers
+        counter=1
+        declare -a items
+        declare -a item_types
+        
+        if [ -d "$current_dir" ]; then
+            # First, list directories
+            while IFS= read -r -d '' dir; do
+                if [ -d "$dir" ] && [ "$(basename "$dir")" != "." ] && [ "$(basename "$dir")" != ".." ]; then
+                    items[$counter]="$dir"
+                    item_types[$counter]="dir"
+                    echo "$counter) 📁 $(basename "$dir")/"
+                    ((counter++))
+                fi
+            done < <(find "$current_dir" -maxdepth 1 -type d -print0 | sort -z)
+            
+            # Then, list common source files
+            while IFS= read -r -d '' file; do
+                if [ -f "$file" ]; then
+                    filename="$(basename "$file")"
+                    # Show common source file extensions
+                    if [[ "$filename" =~ \.(py|js|ts|java|cpp|c|go|rs|kt|swift|php|rb|cs|scala|clj|hs|ml|fs|elm|dart|lua|r|m|mm|h|hpp|cc|cxx)$ ]]; then
+                        items[$counter]="$file"
+                        item_types[$counter]="file"
+                        echo "$counter) 📄 $filename"
+                        ((counter++))
+                    fi
+                fi
+            done < <(find "$current_dir" -maxdepth 1 -type f -print0 | sort -z)
+        fi
+        
+        echo ""
+        echo "Enter your choice (0 for parent, 1+ for directory/file, m for multiple files, q to quit):"
+        read -r choice
+        
+        case $choice in
+            0)
+                # Go to parent directory
+                current_dir="$(dirname "$current_dir")"
+                ;;
+            m|M)
+                # Multiple file selection mode
+                echo ""
+                echo "🌳 Multiple File Selection Mode"
+                echo "Enter file numbers separated by spaces (e.g., 2 5 7):"
+                read -r file_choices
+                
+                selected_files=()
+                for choice_num in $file_choices; do
+                    if [[ "$choice_num" =~ ^[0-9]+$ ]] && [ "$choice_num" -ge 1 ] && [ "$choice_num" -lt "$counter" ]; then
+                        if [ "${item_types[$choice_num]}" = "file" ]; then
+                            selected_files+=("${items[$choice_num]}")
+                        fi
+                    fi
+                done
+                
+                if [ ${#selected_files[@]} -gt 0 ]; then
+                    echo ""
+                    echo "🌳 Selected files:"
+                    for file in "${selected_files[@]}"; do
+                        echo "   📄 $(basename "$file")"
+                    done
+                    echo ""
+                    echo "🌳 Measuring AST generation time for multiple files..."
+                    python3 ast.py "${selected_files[@]}"
+                    break
+                else
+                    echo "❌ No valid files selected"
+                    sleep 2
+                fi
+                ;;
+            q|Q)
+                echo "❌ Cancelled"
+                break
+                ;;
+            *)
+                # Check if it's a valid choice
+                if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -lt "$counter" ]; then
+                    selected_item="${items[$choice]}"
+                    item_type="${item_types[$choice]}"
+                    
+                    if [ "$item_type" = "dir" ] && [ -d "$selected_item" ]; then
+                        current_dir="$selected_item"
+                    elif [ "$item_type" = "file" ] && [ -f "$selected_item" ]; then
+                        echo ""
+                        echo "🌳 Selected file: $(basename "$selected_item")"
+                        echo "🌳 Measuring AST generation time..."
+                        python3 ast.py "$selected_item"
+                        break
+                    else
+                        echo "❌ Invalid selection"
+                        sleep 1
+                    fi
+                else
+                    echo "❌ Invalid choice"
+                    sleep 1
+                fi
+                ;;
+        esac
+    done
 
 # Run both ctag and AST measurements for common files in a project
 measure-all PROJECT_PATH="":
